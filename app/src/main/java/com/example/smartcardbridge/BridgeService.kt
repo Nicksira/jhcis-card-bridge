@@ -1,10 +1,18 @@
 package com.example.smartcardbridge
 
-import android.app.*
+import android.app.AlarmManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.hardware.usb.*
+import android.hardware.usb.UsbConstants
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbEndpoint
+import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
@@ -22,6 +30,8 @@ class BridgeService : Service() {
     private val CHANNEL_ID = "jhcis_bridge_channel"
     private val ACTION_USB_PERMISSION = "com.example.smartcardbridge.USB_PERMISSION"
 
+    private fun bytes(vararg v: Int): ByteArray = ByteArray(v.size) { v[it].toByte() }
+
     override fun onCreate() {
         super.onCreate()
         usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
@@ -34,11 +44,9 @@ class BridgeService : Service() {
         if (!isRunning) {
             startLocalServer()
         }
-        // START_STICKY สั่งให้ Android ปลุก Service ขึ้นมาใหม่ทันทีหากแรมเต็ม
         return START_STICKY
     }
 
-    // หากโดนบังคับปัดแอปทิ้ง ให้ตั้งเวลาปลุกตัวเองกลับมาทำงานภายใน 1 วินาที
     override fun onTaskRemoved(rootIntent: Intent?) {
         val restartIntent = Intent(applicationContext, BridgeService::class.java).also {
             it.setPackage(packageName)
@@ -60,10 +68,8 @@ class BridgeService : Service() {
                 CHANNEL_ID,
                 "JHCIS Card Bridge Service",
                 NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "รักษาระบบอ่านบัตรประชาชนให้ทำงานเบื้องหลังตลอดเวลา"
-            }
-            val manager = getSystemService(NotificationManager::class.java)
+            )
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
         }
 
@@ -78,8 +84,8 @@ class BridgeService : Service() {
         }
 
         val notification = builder
-            .setContentTitle("🟢 JHCIS Card Bridge กำลังทำงาน")
-            .setContentText("พอร์ต 8189 พร้อมอ่านบัตรประชาชน (แตะเพื่อเปิดหน้าตั้งค่า)")
+            .setContentTitle("JHCIS Card Bridge (Port 8189)")
+            .setContentText("ระบบอ่านบัตรทำงานอยู่เบื้องหลังตลอดเวลา")
             .setSmallIcon(android.R.drawable.stat_sys_data_usb)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -125,26 +131,28 @@ class BridgeService : Service() {
             return null
         }
 
-        var epIn: UsbEndpoint? = null
-        var epOut: UsbEndpoint? = null
+        var foundIn: UsbEndpoint? = null
+        var foundOut: UsbEndpoint? = null
         for (i in 0 until intf.endpointCount) {
             val ep = intf.getEndpoint(i)
             if (ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK) {
-                if (ep.direction == UsbConstants.USB_DIR_IN) epIn = ep
-                else epOut = ep
+                if (ep.direction == UsbConstants.USB_DIR_IN) foundIn = ep
+                else foundOut = ep
             }
         }
 
+        val epIn = foundIn
+        val epOut = foundOut
         if (epIn == null || epOut == null) {
             conn.releaseInterface(intf)
             conn.close()
             return null
         }
 
-        var seq: Byte = 0
+        var seq = 0
         fun sendCcidApdu(apdu: ByteArray): ByteArray? {
-            val header = byteArrayOf(
-                0x6F, (apdu.size and 0xFF).toByte(), ((apdu.size shr 8) and 0xFF).toByte(),
+            val header = bytes(
+                0x6F, apdu.size and 0xFF, (apdu.size shr 8) and 0xFF,
                 0x00, 0x00, 0x00, seq++, 0x00, 0x00, 0x00
             )
             val packet = header + apdu
@@ -163,7 +171,7 @@ class BridgeService : Service() {
         }
 
         try {
-            val powerOn = byteArrayOf(0x62, 0x00, 0x00, 0x00, 0x00, 0x00, seq++, 0x00, 0x00, 0x00)
+            val powerOn = bytes(0x62, 0x00, 0x00, 0x00, 0x00, 0x00, seq++, 0x00, 0x00, 0x00)
             conn.bulkTransfer(epOut, powerOn, powerOn.size, 1000)
             val atrBuf = ByteArray(128)
             val atrLen = conn.bulkTransfer(epIn, atrBuf, atrBuf.size, 1000)
@@ -171,17 +179,12 @@ class BridgeService : Service() {
                 return null
             }
 
-            sendCcidApdu(byteArrayOf(
-                0x00, 0xA4.toByte(), 0x04, 0x00, 0x08,
-                0xA0.toByte(), 0x00, 0x00, 0x00, 0x54, 0x48, 0x00, 0x01
-            )) ?: return null
+            sendCcidApdu(bytes(0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x54, 0x48, 0x00, 0x01)) ?: return null
 
-            var resp = sendCcidApdu(byteArrayOf(
-                0x80.toByte(), 0xB0.toByte(), 0x00, 0x04, 0x02, 0x00, 0x0D
-            )) ?: return null
+            var resp = sendCcidApdu(bytes(0x80, 0xB0, 0x00, 0x04, 0x02, 0x00, 0x0D)) ?: return null
 
             if (resp.size < 23) {
-                resp = sendCcidApdu(byteArrayOf(0x00, 0xC0.toByte(), 0x00, 0x00, 0x0D)) ?: return null
+                resp = sendCcidApdu(bytes(0x00, 0xC0, 0x00, 0x00, 0x0D)) ?: return null
             }
 
             if (resp.size >= 23) {
