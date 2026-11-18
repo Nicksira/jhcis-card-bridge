@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbManager
 import android.os.Build
@@ -116,6 +117,32 @@ class BridgeService : Service() {
         return null
     }
 
+    private fun sendCcidApdu(
+        conn: UsbDeviceConnection,
+        epOut: UsbEndpoint,
+        epIn: UsbEndpoint,
+        seq: Int,
+        apdu: ByteArray
+    ): ByteArray? {
+        val header = bytes(
+            0x6F, apdu.size and 0xFF, (apdu.size shr 8) and 0xFF,
+            0x00, 0x00, 0x00, seq, 0x00, 0x00, 0x00
+        )
+        val packet = header + apdu
+        if (conn.bulkTransfer(epOut, packet, packet.size, 1500) < 0) return null
+
+        val buf = ByteArray(256)
+        for (retry in 0..4) {
+            val len = conn.bulkTransfer(epIn, buf, buf.size, 1500)
+            if (len >= 10) {
+                val bStatus = buf[7].toInt() and 0xFF
+                val timeExt = (bStatus shr 6) and 0x03
+                if (timeExt != 2) return buf.copyOf(len)
+            }
+        }
+        return null
+    }
+
     private fun readCidFromHardware(): String? {
         val device = findSmartCardDevice() ?: return null
         if (!usbManager.hasPermission(device)) return null
@@ -149,29 +176,8 @@ class BridgeService : Service() {
             return null
         }
 
-        var seq = 0
-        fun sendCcidApdu(apdu: ByteArray): ByteArray? {
-            val header = bytes(
-                0x6F, apdu.size and 0xFF, (apdu.size shr 8) and 0xFF,
-                0x00, 0x00, 0x00, seq++, 0x00, 0x00, 0x00
-            )
-            val packet = header + apdu
-            if (conn.bulkTransfer(epOut, packet, packet.size, 1500) < 0) return null
-
-            val buf = ByteArray(256)
-            for (retry in 0..4) {
-                val len = conn.bulkTransfer(epIn, buf, buf.size, 1500)
-                if (len >= 10) {
-                    val bStatus = buf[7].toInt() and 0xFF
-                    val timeExt = (bStatus shr 6) and 0x03
-                    if (timeExt != 2) return buf.copyOf(len)
-                }
-            }
-            return null
-        }
-
         try {
-            val powerOn = bytes(0x62, 0x00, 0x00, 0x00, 0x00, 0x00, seq++, 0x00, 0x00, 0x00)
+            val powerOn = bytes(0x62, 0x00, 0x00, 0x00, 0x00, 0x00, 0, 0x00, 0x00, 0x00)
             conn.bulkTransfer(epOut, powerOn, powerOn.size, 1000)
             val atrBuf = ByteArray(128)
             val atrLen = conn.bulkTransfer(epIn, atrBuf, atrBuf.size, 1000)
@@ -179,16 +185,20 @@ class BridgeService : Service() {
                 return null
             }
 
-            sendCcidApdu(bytes(0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x54, 0x48, 0x00, 0x01)) ?: return null
+            val selectCmd = bytes(0x00, 0xA4, 0x04, 0x00, 0x08, 0xA0, 0x00, 0x00, 0x00, 0x54, 0x48, 0x00, 0x01)
+            sendCcidApdu(conn, epOut, epIn, 1, selectCmd) ?: return null
 
-            var resp = sendCcidApdu(bytes(0x80, 0xB0, 0x00, 0x04, 0x02, 0x00, 0x0D)) ?: return null
+            val readCmd = bytes(0x80, 0xB0, 0x00, 0x04, 0x02, 0x00, 0x0D)
+            var resp = sendCcidApdu(conn, epOut, epIn, 2, readCmd) ?: return null
 
             if (resp.size < 23) {
-                resp = sendCcidApdu(bytes(0x00, 0xC0, 0x00, 0x00, 0x0D)) ?: return null
+                val getRespCmd = bytes(0x00, 0xC0, 0x00, 0x00, 0x0D)
+                resp = sendCcidApdu(conn, epOut, epIn, 3, getRespCmd) ?: return null
             }
 
             if (resp.size >= 23) {
-                val cid = String(resp, 10, 13, Charsets.US_ASCII).replace(Regex("[^0-9]"), "")
+                val rawCid = resp.decodeToString(10, 23)
+                val cid = rawCid.replace(Regex("[^0-9]"), "")
                 if (cid.length == 13) return cid
             }
             return null
