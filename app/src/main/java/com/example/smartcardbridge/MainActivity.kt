@@ -34,7 +34,7 @@ class MainActivity : Activity() {
         statusText = TextView(this).apply {
             textSize = 20f
             gravity = Gravity.CENTER
-            text = "🟢 JHCIS Card Bridge (Port 8189)\nกำลังรอเครื่องอ่านบัตร..."
+            text = "JHCIS Card Bridge (Port 8189)\nReady for Smart Card Reader..."
         }
         layout.addView(statusText)
         setContentView(layout)
@@ -172,9 +172,9 @@ class MainActivity : Activity() {
                                 out.write(preflight.toByteArray())
                             } else if (requestLine.contains("/api/smartcard/read")) {
                                 val cid = readCidFromHardware()
-                                val jsonBody = if (cid != null) """{"pid":"$cid"}""" else """\{\}"""
+                                val jsonBody = if (cid != null) "{\"pid\":\"$cid\"}" else "{}"
                                 runOnUiThread {
-                                    statusText.text = if (cid != null) "✅ อ่านบัตรสำเร็จ: $cid" else "⏳ รอเสียบบัตรประชาชน..."
+                                    statusText.text = if (cid != null) "Read OK: $cid" else "Waiting for ID Card..."
                                 }
                                 val response = "HTTP/1.1 200 OK\r\n" +
                                         "Content-Type: application/json; charset=utf-8\r\n" +
@@ -195,7 +195,7 @@ class MainActivity : Activity() {
                     }
                 }
             } catch (e: Exception) {
-                runOnUiThread { statusText.text = "❌ พอร์ต 8189 ถูกใช้งานอยู่: ${e.message}" }
+                runOnUiThread { statusText.text = "Port 8189 Error: ${e.message}" }
             }
         }
     }
