@@ -87,7 +87,7 @@ class BridgeService : Service() {
         val notification = builder
             .setContentTitle("JHCIS Card Bridge (Port 8189)")
             .setContentText("Smart Card Reader Service is running in background")
-            .setSmallIcon(android.R.drawable.stat_sys_data_usb)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
