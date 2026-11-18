@@ -2,9 +2,14 @@ package com.example.smartcardbridge
 
 import android.app.Activity
 import android.app.PendingIntent
-import android.content.*
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Color
-import android.hardware.usb.*
+import android.hardware.usb.UsbConstants
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -30,7 +35,7 @@ class MainActivity : Activity() {
                 if (device != null && usbManager.hasPermission(device)) {
                     openWebKiosk()
                 } else {
-                    statusText.text = "⚠️ ไม่ได้รับอนุญาตให้เข้าถึง USB\nกรุณาถอดสายแล้วเสียบใหม่อีกครั้ง"
+                    statusText.text = "USB Permission Denied. Please replug reader."
                 }
             }
         }
@@ -48,11 +53,11 @@ class MainActivity : Activity() {
         statusText = TextView(this).apply {
             textSize = 20f
             gravity = Gravity.CENTER
-            text = "🟢 JHCIS Card Bridge ทำงานเบื้องหลังแล้ว\n(ป้องกันการปัดแอปทิ้ง 100%)"
+            text = "JHCIS Card Bridge (Port 8189)\nBackground Service Active"
         }
 
         val openWebBtn = Button(this).apply {
-            text = "🌐 เปิดเว็บ Mini Health Station ทันที"
+            text = "Open Mini Health Station"
             textSize = 16f
             setBackgroundColor(Color.parseColor("#10B981"))
             setTextColor(Color.WHITE)
@@ -74,7 +79,6 @@ class MainActivity : Activity() {
 
         usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
 
-        // สั่งรัน Foreground Service ทันที
         val serviceIntent = Intent(this, BridgeService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(serviceIntent)
@@ -82,12 +86,10 @@ class MainActivity : Activity() {
             startService(serviceIntent)
         }
 
-        // ขอสิทธิ์แสดงแจ้งเตือนบน Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 100)
         }
 
-        // ขอปลดล็อกการประหยัดพลังงานของ Samsung ไม่ให้ตัดการทำงานเบื้องหลัง
         requestIgnoreBatteryOptimization()
 
         val filter = IntentFilter(ACTION_USB_PERMISSION)
@@ -139,7 +141,7 @@ class MainActivity : Activity() {
             if (usbManager.hasPermission(device)) {
                 openWebKiosk()
             } else {
-                statusText.text = "🔌 พบเครื่องอ่านบัตร!\nกรุณากด 'ตกลง' บนหน้าต่างขอสิทธิ์ USB..."
+                statusText.text = "Smart Card Reader found. Please tap OK on USB prompt..."
                 val permissionIntent = Intent(ACTION_USB_PERMISSION).apply { setPackage(packageName) }
                 val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
                 val pi = PendingIntent.getBroadcast(this, 0, permissionIntent, flags)
@@ -164,7 +166,6 @@ class MainActivity : Activity() {
             }
             startActivity(fallbackIntent)
         }
-        // ปิดหน้าต่าง Activity ลงไปเหลือแต่ Service เบื้องหลังเพื่อไม่ให้เกะกะหน้าจอ
         finish()
     }
 

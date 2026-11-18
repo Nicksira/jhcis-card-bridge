@@ -86,7 +86,7 @@ class BridgeService : Service() {
 
         val notification = builder
             .setContentTitle("JHCIS Card Bridge (Port 8189)")
-            .setContentText("ระบบอ่านบัตรทำงานอยู่เบื้องหลังตลอดเวลา")
+            .setContentText("Smart Card Reader Service is running in background")
             .setSmallIcon(android.R.drawable.stat_sys_data_usb)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -197,8 +197,7 @@ class BridgeService : Service() {
             }
 
             if (resp.size >= 23) {
-                val rawCid = resp.decodeToString(10, 23)
-                val cid = rawCid.replace(Regex("[^0-9]"), "")
+                val cid = String(resp, 10, 13, Charsets.US_ASCII).replace(Regex("[^0-9]"), "")
                 if (cid.length == 13) return cid
             }
             return null

@@ -15,7 +15,6 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
-        <!-- ซ่อนจากรายการปัดแอป (excludeFromRecents) ป้องกัน อสม. เผลอปัดทิ้ง -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -34,7 +33,6 @@
                 android:resource="@xml/device_filter" />
         </activity>
 
-        <!-- บริการรันเบื้องหลังถาวร ไม่ดับแม้ถูกปัดแอปทิ้ง (stopWithTask="false") -->
         <service
             android:name=".BridgeService"
             android:enabled="true"
@@ -42,7 +40,6 @@
             android:stopWithTask="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- ตัวรับสัญญาณเปิดบริการอัตโนมัติเมื่อเปิดเครื่องแท็บเล็ตใหม่ -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
